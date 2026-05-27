@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🏰 Gilbert's Castle</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d15;color:#e8dcc8;font-family:"Courier New",monospace;height:100vh;overflow:hidden}
+.app{height:100vh;display:flex;flex-direction:column}
+.hdr{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:3px solid #c9a227;background:linear-gradient(90deg,#1a1520,#2a1520,#1a1520)}
+.hdr h1{color:#c9a227;font-size:1.1rem;letter-spacing:.08em}
+.hdr .sub{color:#8b7d6b;font-size:.7rem}
+.hdr-r{display:flex;gap:18px;align-items:center;font-size:.8rem}
+.dot{width:10px;height:10px;border-radius:50%;background:#ff5555;box-shadow:0 0 8px #ff5555;display:inline-block}
+.dot.on{background:#44ff88;box-shadow:0 0 10px #44ff88}
+.mn{flex:1;display:flex;gap:14px;padding:14px;min-height:0}
+.cw{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
+canvas{max-width:100%;max-height:100%;border:2px solid #3a3a4a;border-radius:8px;image-rendering:pixelated}
+.sb{width:300px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.pn{background:linear-gradient(135deg,#221a14,#1a1510);border:2px solid #5d4e37;border-radius:8px;padding:12px;overflow-y:auto}
+.ro{flex:1;min-height:0}.ch{height:190px}
+.st{color:#c9a227;font-size:.85rem;margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em}
+.ag{background:#120f0c;border:1px solid #3a3020;border-radius:6px;padding:7px;margin-bottom:6px;cursor:pointer}
+.ag.sel{border-color:#c9a227;background:#20170e}
+.ag:hover{border-color:#5d4e37}
+.rw{display:flex;justify-content:space-between;gap:6px}
+.sm{font-size:.72rem;color:#8b7d6b}
+.gd{color:#c9a227}
+.em{color:#8b7d6b;font-style:italic;font-size:.82rem}
+.ft{border-top:1px solid #1a1a28;text-align:center;padding:6px;color:#555;font-size:.7rem}
+.en{color:#8b7d6b;font-size:.72rem;margin-bottom:3px}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#1a1510}::-webkit-scrollbar-thumb{background:#5d4e37;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="hdr">
+ <div style="display:flex;gap:10px;align-items:center">
+  <span style="font-size:1.6rem">🏰</span>
+  <div><h1>GILBERT'S CASTLE</h1><div class="sub">Where agents toil by torch and quill</div></div>
+ </div>
+ <div class="hdr-r">
+  <span><span id="dot" class="dot"></span> <span id="hl" class="sm">Crystal Dormant</span></span>
+  <span><span style="color:#c9a227">⚔️</span> <span id="ac">Knights: 0</span></span>
+  <span id="ck" class="sm">🕐 --:--</span>
+ </div>
+</div>
+<div class="mn">
+ <div class="cw"><canvas id="cv" width="800" height="560"></canvas></div>
+ <div class="sb">
+  <div class="pn ro"><div class="st">📋 Agent Roster</div><div id="ro"><div class="em">The castle halls are empty...</div></div></div>
+  <div class="pn ch"><div class="st">📖 Chronicle</div><div id="ch"><div class="em">No tales to tell yet...</div></div></div>
+ </div>
+</div>
+<div class="ft">Forged in the fires of OpenClaw • Powered by pixel sorcery</div>
+</div>
+<script>
+// ── Config ──
+// Fetch live session data from sessions.json (pushed by OpenClaw cron)
+const DATA_URL = 'sessions.json';
+
+// ── State ──
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let frame = 0, sel = null, sessions = [], log = [];
+const seen = new Set(), agents = new Map();
+const WB = [{x:120,y:200},{x:250,y:200},{x:380,y:200},{x:120,y:340},{x:250,y:340},{x:380,y:340},{x:510,y:200},{x:510,y:340},{x:640,y:200},{x:640,y:340}];
+const GATE = {x:400,y:520};
+const TORCH = [{x:50,y:60},{x:200,y:60},{x:350,y:60},{x:500,y:60},{x:650,y:60},{x:50,y:280},{x:750,y:280},{x:50,y:460},{x:750,y:460}];
+const COL = {
+  wizard:{p:'#6b3fa0',s:'#4a2d8a',sk:'#e8c89e',a:'#9b59b6'},
+  knight:{p:'#7f8c8d',s:'#5d6d7e',sk:'#e8c89e',a:'#c9a227'},
+  scribe:{p:'#8b4513',s:'#654321',sk:'#e8c89e',a:'#daa520'},
+  archer:{p:'#2d6b2f',s:'#1a4a1c',sk:'#e8c89e',a:'#90ee90'},
+  alchemist:{p:'#2c2c54',s:'#1a1a3e',sk:'#e8c89e',a:'#00ff88'}
+};
+function ctype(m){m=(m||'').toLowerCase();if(m.includes('claude'))return'wizard';if(m.includes('gpt')||m.includes('o1')||m.includes('o3')||m.includes('o4'))return'knight';if(m.includes('gemini'))return'archer';if(m.includes('llama')||m.includes('mistral'))return'alchemist';return'scribe';}
+function ts(){return new Date().toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'});}
+function addLog(m){log.push('['+ts()+'] '+m);if(log.length>20)log=log.slice(-20);renderLog();}
+function renderLog(){const el=document.getElementById('ch');el.innerHTML=log.length?log.slice().reverse().map(x=>'<div class="en">'+x+'</div>').join(''):'<div class="em">No tales to tell yet...</div>';}
+function renderRoster(){const el=document.getElementById('ro');
+ if(!sessions.length){el.innerHTML='<div class="em">The castle halls are empty...</div>';return;}
+ const titles={wizard:'⚡ Archmage',knight:'⚔️ Knight',scribe:'📜 Scribe',archer:'🏹 Ranger',alchemist:'🧪 Alchemist'};
+ const statuses={active:'On Quest',idle:'Resting',running:'In Battle',waiting:'Awaiting Orders'};
+ el.innerHTML=sessions.map(s=>{
+  const t=ctype(s.model),title=titles[t]||'📜 Scribe',st=statuses[s.status]||s.status||'Unknown';
+  const name=s.name||s.displayName||s.key?.slice(0,12)||'unknown';
+  return '<div class="ag'+(sel===s.key?' sel':'')+'" onclick="pick(\''+s.key.replace(/'/g,'')+'\')">'
+   +'<div class="rw"><b style="font-size:.84rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+name+'</b><span class="sm">'+title+'</span></div>'
+   +'<div class="rw" style="margin-top:3px"><span class="sm">'+(s.model||'unknown')+'</span><span class="sm gd">'+st+'</span></div>'
+   +(s.totalTokens!=null?'<div class="sm" style="margin-top:3px">🪙 '+s.totalTokens.toLocaleString()+' tokens</div>':'')
+   +'</div>';
+ }).join('');
+}
+window.pick=function(k){sel=sel===k?null:k;renderRoster();};
+
+// ── Data fetch ──
+async function refresh(){
+ try{
+  let res = await fetch(DATA_URL+'?t='+Date.now(),{cache:'no-store'});
+  let ok = false, list = [];
+  if(res.ok){
+   const d = await res.json();
+   list=d.sessions||[];
+   ok=d.healthy!==false;
+   if(d.updated){const age=Date.now()-new Date(d.updated).getTime();if(age>300000)ok=false;}
+  }
+  document.getElementById('dot').className='dot'+(ok?' on':'');
+  document.getElementById('hl').textContent=ok?'Crystal Online':'Crystal Dormant';
+  document.getElementById('ac').textContent='Knights: '+list.length;
+  sessions=list;
+  const nowIds=new Set(list.map(s=>s.key||s.id));
+  list.forEach((s,i)=>{
+   const key=s.key||s.id;
+   const name=s.name||s.displayName||key.slice(0,8);
+   if(!seen.has(key))addLog('🏰 '+name+' entered the castle');
+   seen.add(key);
+   if(!agents.has(key)){
+    const pos=WB[i%WB.length];
+    agents.set(key,{key,name,model:s.model||'unknown',status:s.status||'idle',type:ctype(s.model||''),x:GATE.x,y:GATE.y,tx:pos.x,ty:pos.y});
+   } else {
+    const a=agents.get(key);const pos=WB[i%WB.length];
+    a.name=name;a.model=s.model||a.model;a.status=s.status||a.status;a.type=ctype(a.model);a.tx=pos.x;a.ty=pos.y;
+   }
+  });
+  for(const id of Array.from(seen)){
+   if(!nowIds.has(id)){addLog('🚪 '+id.slice(0,8)+' departed');seen.delete(id);if(agents.has(id)){const a=agents.get(id);a.tx=GATE.x;a.ty=GATE.y;}}
+  }
+  renderRoster();
+  }catch(e){
+  // Demo mode - show sample agents if API unreachable
+  if(!sessions.length && !agents.size){
+   document.getElementById('dot').className='dot on';
+   document.getElementById('hl').textContent='Demo Mode';
+   const demo = [
+    {key:'gilbert-main',name:'🎩 Gilbert',model:'claude-opus-4.6',status:'running',totalTokens:142000},
+    {key:'claude-code-1',name:'Claude Code',model:'claude-sonnet-4.6',status:'active',totalTokens:8500},
+    {key:'gpt-knight',name:'Sir GPT',model:'gpt-5.4',status:'idle',totalTokens:55000},
+    {key:'gemini-scout',name:'Gemini Scout',model:'gemini-3-pro',status:'active',totalTokens:23000},
+   ];
+   sessions=demo;
+   demo.forEach((s,i)=>{
+    const key=s.key;
+    if(!seen.has(key))addLog('🏰 '+s.name+' entered the castle');
+    seen.add(key);
+    const pos=WB[i%WB.length];
+    agents.set(key,{key,name:s.name,model:s.model,status:s.status,type:ctype(s.model),x:GATE.x,y:GATE.y,tx:pos.x,ty:pos.y});
+   });
+   document.getElementById('ac').textContent='Knights: '+demo.length;
+   renderRoster();
+  } else {
+   document.getElementById('dot').className='dot';
+   document.getElementById('hl').textContent='Crystal Dormant';
+  }
+ }
+}
+
+// ── Drawing ──
+function dChar(type,x,y,s=3,step=0){
+ const c=COL[type]||COL.scribe;const bob=step%2===0?0:-1;
+ const d=(dx,dy,col)=>{ctx.fillStyle=col;ctx.fillRect(x+dx*s,y+dy*s,s,s);};
+ for(let dx=5;dx<=10;dx++)for(let dy=1+bob;dy<=4+bob;dy++)d(dx,dy,c.sk);
+ d(6,3+bob,'#1a1a1a');d(9,3+bob,'#1a1a1a');
+ if(type==='wizard'){d(7,bob-2,c.p);d(6,bob-1,c.p);d(7,bob-1,c.p);d(8,bob-1,c.p);for(let i=5;i<=10;i++)d(i,bob,c.p);d(7,bob-1,c.a);}
+ else if(type==='knight'){for(let i=5;i<=10;i++){d(i,bob,c.p);d(i,1+bob,c.p);}for(let i=6;i<=9;i++)d(i,1+bob,'#1a1a1a');}
+ else if(type==='archer'){for(let i=5;i<=10;i++)d(i,bob,c.p);d(4,1+bob,c.p);d(11,1+bob,c.p);}
+ else if(type==='alchemist'){for(let i=5;i<=10;i++)d(i,bob,c.p);d(5,bob,c.a);d(10,bob,c.a);}
+ for(let dx=4;dx<=11;dx++)for(let dy=5+bob;dy<=10+bob;dy++)d(dx,dy,c.p);
+ for(let dy=5+bob;dy<=9+bob;dy++){d(7,dy,c.s);d(8,dy,c.s);}
+ for(let dx=4;dx<=11;dx++)d(dx,8+bob,c.a);
+ d(3,6+bob,c.p);d(3,7+bob,c.sk);d(12,6+bob,c.p);d(12,7+bob,c.sk);
+ d(5,11+bob,c.s);d(6,11+bob,c.s);d(5,12+bob,'#3d2b1f');d(6,12+bob,'#3d2b1f');
+ d(9,11+bob,c.s);d(10,11+bob,c.s);d(9,12+bob,'#3d2b1f');d(10,12+bob,'#3d2b1f');
+ if(type==='wizard'){for(let dy=4+bob;dy<=8+bob;dy++)d(13,dy,'#8b4513');d(13,3+bob,'#9b59b6');}
+ else if(type==='knight'){d(2,6+bob,c.a);d(2,7+bob,c.a);d(2,8+bob,c.a);d(3,8+bob,c.a);d(13,5+bob,'#bdc3c7');d(13,4+bob,'#bdc3c7');d(13,3+bob,'#bdc3c7');}
+ else if(type==='archer'){d(13,4+bob,'#8b4513');d(14,5+bob,'#8b4513');d(14,6+bob,'#8b4513');d(14,7+bob,'#8b4513');d(13,8+bob,'#8b4513');d(13,5+bob,'#ddd');d(13,6+bob,'#ddd');d(13,7+bob,'#ddd');}
+ else if(type==='alchemist'){d(13,6+bob,'#88ffaa');d(13,7+bob,'#00ff88');d(14,7+bob,'#00ff88');}
+}
+function dTorch(x,y,s=3,f=0){
+ const d=(dx,dy,c)=>{ctx.fillStyle=c;ctx.fillRect(x+dx*s,y+dy*s,s,s);};
+ d(1,4,'#5d4e37');d(2,4,'#5d4e37');d(1,5,'#5d4e37');d(1,2,'#8b4513');d(1,3,'#8b4513');
+ const i=f%3;
+ if(i===0){d(0,0,'#ff6600');d(1,0,'#ff8c00');d(2,0,'#ff6600');d(1,1,'#ffaa00');d(0,1,'#ff4400');d(2,1,'#ff4400');}
+ else if(i===1){d(1,0,'#ff6600');d(0,1,'#ff8c00');d(1,1,'#ffcc00');d(2,1,'#ff8c00');d(1,-1,'#ff4400');}
+ else{d(0,0,'#ff4400');d(1,0,'#ffaa00');d(2,0,'#ff8c00');d(1,1,'#ff6600');d(2,1,'#ff2200');}
+}
+
+function dKing(x,y,s=3,f=0){
+ // Dylan the King - sitting on throne
+ const bob=f%60<30?0:-1;
+ const d=(dx,dy,col)=>{ctx.fillStyle=col;ctx.fillRect(x+dx*s,y+dy*s,s,s);};
+ // Crown
+ d(6,bob-2,'#c9a227');d(7,bob-2,'#c9a227');d(8,bob-2,'#c9a227');d(9,bob-2,'#c9a227');
+ d(6,bob-3,'#c9a227');d(9,bob-3,'#c9a227');d(7,bob-4,'#ff4444');d(8,bob-4,'#c9a227');
+ // Head
+ for(let dx=6;dx<=9;dx++)for(let dy=bob-1;dy<=bob+2;dy++)d(dx,dy,'#e8c89e');
+ d(7,bob+1,'#1a1a1a');d(8,bob+1,'#1a1a1a'); // eyes
+ // Royal robe (purple + gold trim)
+ for(let dx=4;dx<=11;dx++)for(let dy=bob+3;dy<=bob+8;dy++)d(dx,dy,'#4a1a6b');
+ // Gold trim
+ for(let dx=4;dx<=11;dx++)d(dx,bob+3,'#c9a227');
+ for(let dx=4;dx<=11;dx++)d(dx,bob+8,'#c9a227');
+ d(4,bob+4,'#c9a227');d(4,bob+5,'#c9a227');d(11,bob+4,'#c9a227');d(11,bob+5,'#c9a227');
+ // Ermine collar (white dots)
+ d(5,bob+3,'#ffffff');d(7,bob+3,'#ffffff');d(9,bob+3,'#ffffff');
+ // Arms resting on throne arms
+ d(3,bob+5,'#e8c89e');d(12,bob+5,'#e8c89e');
+ // Scepter in right hand
+ d(13,bob+3,'#c9a227');d(13,bob+4,'#8b4513');d(13,bob+5,'#8b4513');
+ d(13,bob+2,'#9b59b6'); // gem on top
+ // Legs/boots
+ d(6,bob+9,'#1a1a1a');d(7,bob+9,'#1a1a1a');d(8,bob+9,'#1a1a1a');d(9,bob+9,'#1a1a1a');
+ // Name label
+ ctx.font='10px "Courier New",monospace';ctx.textAlign='center';
+ ctx.fillStyle='#c9a227';ctx.fillText('Dylan',x+7*s,y+bob*s-14);
+}
+
+function draw(){
+ const W=cv.width,H=cv.height;
+ ctx.fillStyle='#0d0d15';ctx.fillRect(0,0,W,H);
+ // Floor
+ for(let tx=0;tx<W;tx+=40)for(let ty=80;ty<H;ty+=40){ctx.fillStyle=((tx+ty)/40)%2===0?'#1e1e2e':'#1a1a28';ctx.fillRect(tx,ty,39,39);ctx.fillStyle='#12121c';ctx.fillRect(tx+39,ty,1,40);ctx.fillRect(tx,ty+39,40,1);}
+ // Top wall
+ ctx.fillStyle='#2a2a3a';ctx.fillRect(0,0,W,85);for(let bx=0;bx<W;bx+=60){ctx.fillStyle='#33334a';ctx.fillRect(bx+2,5,56,35);ctx.fillStyle='#2e2e42';ctx.fillRect(bx+32,42,56,35);}for(let bx=0;bx<W;bx+=30)if((bx/30)%2===0){ctx.fillStyle='#3a3a4a';ctx.fillRect(bx,0,20,15);}
+ // Side walls
+ ctx.fillStyle='#2a2a3a';ctx.fillRect(0,80,30,H-80);ctx.fillRect(W-30,80,30,H-80);
+ // Gate
+ ctx.fillStyle='#2a2a3a';ctx.fillRect(0,H-50,W,50);ctx.fillStyle='#0a0a12';ctx.fillRect(GATE.x-30,H-50,60,50);ctx.beginPath();ctx.arc(GATE.x,H-50,30,Math.PI,0);ctx.fillStyle='#2a2a3a';ctx.fill();ctx.beginPath();ctx.arc(GATE.x,H-50,25,Math.PI,0);ctx.fillStyle='#0a0a12';ctx.fill();for(let gx=GATE.x-22;gx<=GATE.x+22;gx+=8){ctx.fillStyle='#5d4e37';ctx.fillRect(gx,H-48,2,48);}
+ // Throne
+ ctx.fillStyle='#1a1520';ctx.fillRect(320,90,160,80);ctx.fillStyle='#8b4513';ctx.fillRect(380,100,40,50);ctx.fillStyle='#c9a227';ctx.fillRect(385,95,30,10);ctx.fillRect(390,90,20,8);ctx.fillRect(394,86,4,4);ctx.fillRect(398,84,4,4);ctx.fillRect(402,86,4,4);ctx.fillStyle='#6b1111';ctx.fillRect(395,150,10,120);ctx.fillStyle='#c9a227';ctx.fillRect(393,150,2,120);ctx.fillRect(405,150,2,120);
+ // Workbenches
+ WB.forEach(p=>{ctx.fillStyle='#5d4e37';ctx.fillRect(p.x-20,p.y+30,50,15);ctx.fillStyle='#4a3f2f';ctx.fillRect(p.x-18,p.y+45,6,10);ctx.fillRect(p.x+22,p.y+45,6,10);ctx.fillStyle='#e8dcc8';ctx.fillRect(p.x-8,p.y+32,20,8);ctx.fillStyle='#6b5e4a';ctx.fillRect(p.x-8,p.y+32,2,8);ctx.fillRect(p.x+10,p.y+32,2,8);ctx.fillStyle='#1a1a1a';ctx.fillRect(p.x+16,p.y+32,5,6);});
+ // Tavern
+ ctx.fillStyle='#1a1520';ctx.fillRect(35,H-170,150,110);[{x:55,y:H-160},{x:85,y:H-160},{x:70,y:H-135}].forEach(b=>{ctx.fillStyle='#6b4226';ctx.fillRect(b.x,b.y,20,25);ctx.fillStyle='#8b5a2b';ctx.fillRect(b.x+2,b.y+2,16,21);ctx.fillStyle='#555';ctx.fillRect(b.x,b.y+5,20,2);ctx.fillRect(b.x,b.y+18,20,2);});ctx.fillStyle='#5d4e37';ctx.fillRect(120,H-155,50,12);ctx.fillStyle='#888';ctx.fillRect(130,H-162,8,10);ctx.fillRect(145,H-162,8,10);
+ // Cauldron
+ ctx.fillStyle='#1a1520';ctx.fillRect(W-185,H-170,150,110);ctx.fillStyle='#2c2c2c';ctx.beginPath();ctx.ellipse(W-110,H-120,30,20,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#1a1a1a';ctx.beginPath();ctx.ellipse(W-110,H-125,25,15,0,0,Math.PI*2);ctx.fill();ctx.fillStyle=frame%4<2?'#44ff88':'#22dd66';ctx.beginPath();ctx.ellipse(W-110,H-125,22,12,0,0,Math.PI*2);ctx.fill();[{dx:-10,dy:-5-(frame%6)},{dx:5,dy:-8-((frame+2)%5)},{dx:0,dy:-3-((frame+4)%7)}].forEach(b=>{ctx.fillStyle='#66ffaa';ctx.beginPath();ctx.arc(W-110+b.dx,H-125+b.dy,3,0,Math.PI*2);ctx.fill();});const fire=['#ff4400','#ff6600','#ff8800'];ctx.fillStyle=fire[frame%3];ctx.fillRect(W-130,H-100,10,8);ctx.fillStyle=fire[(frame+1)%3];ctx.fillRect(W-115,H-100,10,8);ctx.fillStyle=fire[(frame+2)%3];ctx.fillRect(W-100,H-100,10,8);ctx.fillStyle='#5d4e37';ctx.fillRect(W-175,H-160,60,5);['#ff4444','#4444ff','#44ff44','#ffaa00'].forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(W-170+i*14,H-172,6,12);ctx.fillStyle='#ddd';ctx.fillRect(W-169+i*14,H-175,4,3);});
+ // Banners
+ ['#8b1a1a','#1a4a8b','#1a6b1a'].forEach((c,i)=>{const bx=[100,400,700][i];ctx.fillStyle='#c9a227';ctx.fillRect(bx-1,15,22,3);ctx.fillStyle=c;ctx.fillRect(bx,18,20,40);ctx.beginPath();ctx.moveTo(bx,58);ctx.lineTo(bx+10,68);ctx.lineTo(bx+20,58);ctx.fill();ctx.fillStyle='#c9a227';ctx.fillRect(bx+7,28,6,6);});
+ // Torches
+ TORCH.forEach(tp=>{dTorch(tp.x,tp.y,3,frame);const gl=40+Math.sin(frame*.3+tp.x)*8;const g=ctx.createRadialGradient(tp.x+3,tp.y,0,tp.x+3,tp.y,gl);g.addColorStop(0,'rgba(255,140,0,0.15)');g.addColorStop(1,'rgba(255,140,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(tp.x+3,tp.y,gl,0,Math.PI*2);ctx.fill();});
+ // King Dylan on throne
+ dKing(382,105,3,frame);
+ // Agents
+ for(const[id,a]of agents){
+  const dx=a.tx-a.x,dy=a.ty-a.y,dist=Math.sqrt(dx*dx+dy*dy);if(dist>2){a.x+=dx/dist*2;a.y+=dy/dist*2;}
+  dChar(a.type,a.x,a.y,3,Math.floor(frame/30));
+  ctx.font='10px "Courier New",monospace';ctx.textAlign='center';
+  if(sel===id){ctx.fillStyle='#c9a227';ctx.fillRect(a.x-2,a.y-8,52,14);ctx.fillStyle='#0d0d15';}else ctx.fillStyle='#e8dcc8';
+  const nm=a.name.length>10?a.name.slice(0,9)+'…':a.name;ctx.fillText(nm,a.x+24,a.y);
+  if(sel===id){ctx.strokeStyle='#c9a227';ctx.lineWidth=2;ctx.strokeRect(a.x-5,a.y-10,58,60);}
+  // Remove departed agents that reached gate
+  if(!seen.has(id)){const dg=Math.sqrt((a.x-GATE.x)**2+(a.y-GATE.y)**2);if(dg<5)agents.delete(id);}
+ }
+ frame++;
+ requestAnimationFrame(draw);
+}
+// ── Clock ──
+setInterval(()=>{document.getElementById('ck').textContent='🕐 '+new Date().toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'})+' ET';},1000);
+// ── Init ──
+refresh();
+setInterval(refresh,10000);
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
